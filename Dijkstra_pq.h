@@ -60,9 +60,10 @@ public:
 
     void parallel() override {
         oneapi::tbb::concurrent_priority_queue<Node*, CompareDistance> queue;
-
         Node* currentNode = this->nodes[sourceNode];
         queue.push(currentNode);
+
+        auto size = this->nodes.size();
 
         while(!queue.empty()) {
             queue.try_pop(currentNode);
@@ -70,27 +71,24 @@ public:
             if(!currentNode->visited) { // not visited, so take it
                 currentNode->visited = true;
 
-                auto node = this->nodes;
                 // iterate through all neighbours of current visited node
-                oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<size_t>(0, node.size()),
-                                          [&](const oneapi::tbb::blocked_range<size_t> &r) {
-                                              Arc edge =  &currentNode->edges[i];
+                oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<std::size_t>(1, size_t(this->nodes.size())), [&](const oneapi::tbb::blocked_range<size_t>& r) {
+                    for (size_t j = r.begin(); j != r.end(); j++) {
+                        Arc* edge =  &currentNode->edges[j];
 
-                                              for (size_t j = r.begin(); j != r.end(); j++) {
-                                                  // if neighbouring node has not been visited yet: update distance
-                                                  if(!this->nodes[edge.next]->visited) {
-                                                      unsigned newDistance = currentNode->dist + edge.weight;
+                        if (edge->next != 0 && edge->next <= this->nodes.size()) {
+                            if (!this->nodes[edge->next]->visited) {
+                                unsigned newDistance = currentNode->dist + edge->weight;
 
-                                                      if(this->nodes[edge.next]->dist > newDistance) {
-                                                          this->nodes[edge.next]->dist = newDistance;
-                                                          this->nodes[edge.next]->prev = currentNode;
-                                                      }
-                                                      queue.push(this->nodes[edge.next]);
-                                                  }
-                                              }
-                                          });
-
-
+                                if (this->nodes[edge->next]->dist > newDistance) {
+                                    this->nodes[edge->next]->dist = newDistance;
+                                    this->nodes[edge->next]->prev = currentNode;
+                                }
+                                queue.push(this->nodes[edge->next]);
+                            }
+                        }
+                    }
+                });
             }
         }
     }

@@ -21,7 +21,7 @@ public:
     Node(unsigned id) {
         this->id = id;
         this->edges = vector<Arc>();
-        this->prev = NULL; // 0 = undefined/not visited
+        this->prev = NULL;
         this->dist = UINT_MAX;
         this->visited = false;
     }
