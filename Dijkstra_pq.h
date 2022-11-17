@@ -5,47 +5,53 @@
 #ifndef DIJKSTRA_DIJKSTRA_PQ_H
 #define DIJKSTRA_DIJKSTRA_PQ_H
 
-#include "Graph.h"
+#include "Graph_pq.h"
+#include "CompareDistance.h"
 #include <tbb/parallel_for.h>
+#include <oneapi/tbb/concurrent_priority_queue.h>
+#include <queue>
 
-class Dijkstra : public Graph {
+using namespace std;
+
+class Dijkstra_pq : public Graph_pq {
 public:
-    Dijkstra(string input_file) : Graph(input_file) {}
+    Dijkstra_pq(string input_file) : Graph_pq(input_file) {}
 
     void init(unsigned sourceNode) override {
         this->sourceNode = sourceNode;
-        this->distance.resize(this->adjacency_list.size());
-        this->prev.resize(this->adjacency_list.size());
-        this->visited.resize(this->adjacency_list.size());
+        this->nodes.resize(this->adjacency_list.size());
 
-        for (unsigned i = 0; i <= this->adjacency_list.size(); i++) {
-            this->distance[i] = INFINITY;
-            this->prev[i] = 0;
-            this->visited[i] = false;
+        for (unsigned i = 1; i <= this->adjacency_list.size(); i++) {
+            this->nodes[i] = new Node(i);
+            this->nodes[i]->edges = this->adjacency_list[i];
         }
         // set distance of starting node to 0
-        this->distance[sourceNode] = 0;
+        this->nodes[sourceNode]->dist = 0;
     }
 
     void sequential() override {
-        for (unsigned i = 1; i <= this->adjacency_list.size(); i++) {
-            unsigned minNodeIndex = this->getNodeMinDist();
-            this->visited[minNodeIndex] = true;
-            auto arc = this->adjacency_list[minNodeIndex];
+        priority_queue<Node*, vector<Node*>, CompareDistance> queue;
 
-            // iterate through all neighbours of current visited node
-            for (auto & j : arc) {
-                // if neighbouring node has not been visited yet: update distance
-                auto neighbour = j.next;
-                auto neighbourDistance = j.weight;
+        Node* startNode = this->nodes[sourceNode];
+        queue.push(startNode);
 
-                if (!this->visited[neighbour]) {
-                    auto proposedDistance = this->distance[minNodeIndex] + neighbourDistance;
 
-                    if (proposedDistance < this->distance[neighbour]) {
-                        // update distance and set predecessors node
-                        this->distance[neighbour] = proposedDistance;
-                        this->prev[neighbour] = minNodeIndex;
+        while(!queue.empty()) {
+            Node* currentNode = queue.top();
+            queue.pop();
+
+            if(!currentNode->visited) { // not visited, so take it
+                currentNode->visited = true;
+
+                for(Arc edge : currentNode->edges) {
+                    if(!this->nodes[edge.next]->visited) {
+                        unsigned newDistance = currentNode->dist + edge.weight;
+
+                        if(this->nodes[edge.next]->dist > newDistance) {
+                            this->nodes[edge.next]->dist = newDistance;
+                            this->nodes[edge.next]->prev = currentNode;
+                        }
+                        queue.push(this->nodes[edge.next]);
                     }
                 }
             }
@@ -53,34 +59,45 @@ public:
     }
 
     void parallel() override {
-        for (unsigned i = 1; i < this->adjacency_list.size(); i++) {
-            unsigned minNodeIndex = this->getNodeMinDist();
-            this->visited[minNodeIndex] = true;
-            auto node = this->adjacency_list[minNodeIndex];
+        oneapi::tbb::concurrent_priority_queue<Node*, CompareDistance> queue;
 
-            // iterate through all neighbours of current visited node
-            oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<size_t>(0, node.size()),
-                                      [&](const oneapi::tbb::blocked_range<size_t> &r) {
-                                          for (size_t j = r.begin(); j != r.end(); j++) {
-                                              // if neighbouring node has not been visited yet: update distance
-                                              auto neighbour = node[j].next;
-                                              auto neighbourDistance = node[j].weight;
+        Node* currentNode = this->nodes[sourceNode];
+        queue.push(currentNode);
 
-                                              if (!this->visited[neighbour]) {
-                                                  auto proposedDistance =
-                                                          this->distance[minNodeIndex] + neighbourDistance;
+        while(!queue.empty()) {
+            queue.try_pop(currentNode);
 
-                                                  if (proposedDistance < this->distance[neighbour]) {
-                                                      // update distance and set predecessors node
-                                                      this->distance[neighbour] = proposedDistance;
-                                                      this->prev[neighbour] = minNodeIndex;
+            if(!currentNode->visited) { // not visited, so take it
+                currentNode->visited = true;
+
+                auto node = this->nodes;
+                // iterate through all neighbours of current visited node
+                oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<size_t>(0, node.size()),
+                                          [&](const oneapi::tbb::blocked_range<size_t> &r) {
+                                              Arc edge =  &currentNode->edges[i];
+
+                                              for (size_t j = r.begin(); j != r.end(); j++) {
+                                                  // if neighbouring node has not been visited yet: update distance
+                                                  if(!this->nodes[edge.next]->visited) {
+                                                      unsigned newDistance = currentNode->dist + edge.weight;
+
+                                                      if(this->nodes[edge.next]->dist > newDistance) {
+                                                          this->nodes[edge.next]->dist = newDistance;
+                                                          this->nodes[edge.next]->prev = currentNode;
+                                                      }
+                                                      queue.push(this->nodes[edge.next]);
                                                   }
                                               }
-                                          }
-                                      });
+                                          });
+
+
+            }
         }
     }
+
 };
+
+
 
 
 #endif //DIJKSTRA_DIJKSTRA_PQ_H
